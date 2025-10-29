@@ -1000,15 +1000,38 @@
                     const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, 320);
                     const samples = new Int16Array(audioData.length);
                     for (let i = 0; i < audioData.length; i++) {
-                        samples[i] = audioData[i] * 32767;
+                        const sample = Math.max(-1, Math.min(1, audioData[i]));
+                        samples[i] = sample < 0 ? sample * 32768 : sample * 32767;
                     }
-                    
+
                     let mp3Data = [];
                     const bufferSize = 1152;
-                    for (let i = 0; i < samples.length; i += bufferSize) {
-                        const chunk = samples.subarray(i, i + bufferSize);
-                        const mp3buf = mp3encoder.encodeBuffer(chunk);
-                        if (mp3buf.length > 0) mp3Data.push(new Int8Array(mp3buf));
+
+                    if (channels === 2) {
+                        const samplesPerChannel = Math.floor(samples.length / channels);
+                        if (samplesPerChannel * channels !== samples.length) {
+                            console.warn('MP3 export: truncating uneven stereo samples');
+                        }
+                        const left = new Int16Array(samplesPerChannel);
+                        const right = new Int16Array(samplesPerChannel);
+
+                        for (let frame = 0, srcIndex = 0; frame < samplesPerChannel; frame++) {
+                            left[frame] = samples[srcIndex++];
+                            right[frame] = samples[srcIndex++];
+                        }
+
+                        for (let i = 0; i < samplesPerChannel; i += bufferSize) {
+                            const leftChunk = left.subarray(i, Math.min(i + bufferSize, samplesPerChannel));
+                            const rightChunk = right.subarray(i, Math.min(i + bufferSize, samplesPerChannel));
+                            const mp3buf = mp3encoder.encodeBuffer(leftChunk, rightChunk);
+                            if (mp3buf.length > 0) mp3Data.push(new Int8Array(mp3buf));
+                        }
+                    } else {
+                        for (let i = 0; i < samples.length; i += bufferSize) {
+                            const chunk = samples.subarray(i, Math.min(i + bufferSize, samples.length));
+                            const mp3buf = mp3encoder.encodeBuffer(chunk);
+                            if (mp3buf.length > 0) mp3Data.push(new Int8Array(mp3buf));
+                        }
                     }
                     const flushed = mp3encoder.flush();
                     if (flushed.length > 0) mp3Data.push(new Int8Array(flushed));
