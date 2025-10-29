@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Lunaᛜ PitchShift — Audio Editor</title>
+  <style>
+    :root{--bg:#0a0a0b;--panel:#111114;--muted:#a1a1aa;--border:#27272a;--txt:#e5e7eb;--accent:#2563eb;--success:#10b981;}
+    html,body{height:100%}
+    body{margin:0;background:var(--bg);color:var(--txt);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif}
+    .wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
+    .card{width:100%;max-width:720px;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+    h1{font-size:20px;margin:0 0 8px;font-weight:600}
+    p{margin:0 0 12px}
+    .muted{color:var(--muted)}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .grid{display:grid;gap:14px}
+    input[type="file"]{display:block;margin-top:6px;cursor:pointer}
+    input[type="range"]{width:100%;cursor:pointer}
+    button{cursor:pointer}
+    button:disabled{opacity:0.5;cursor:not-allowed}
+    .btn{background:var(--accent);color:#fff;border:none;padding:10px 16px;border-radius:8px;font-size:14px;font-weight:500;transition:all .2s}
+    .btn:hover:not(:disabled){background:#1d4ed8;transform:translateY(-1px)}
+    .btn-success{background:var(--success)}
+    .btn-success:hover:not(:disabled){background:#059669}
+    .btn-outline{background:transparent;color:var(--txt);border:1px solid var(--border);padding:8px 12px;border-radius:8px;font-size:13px;transition:all .2s}
+    .btn-outline:hover{background:rgba(255,255,255,0.05)}
+    .player{background:#0f0f12;padding:12px;border-radius:8px;border:1px solid var(--border)}
+    .waveform{width:100%;height:60px;background:#0a0a0b;border-radius:6px;margin:8px 0;position:relative;overflow:hidden}
+    canvas{display:block;width:100%;height:100%}
+    .playback-controls{display:flex;gap:8px;align-items:center;margin-top:8px}
+    .time-display{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+    .toggle-group{display:inline-flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+    .toggle-btn{background:transparent;border:none;padding:6px 12px;color:var(--muted);font-size:12px;cursor:pointer;transition:all .2s}
+    .toggle-btn.active{background:var(--accent);color:#fff}
+    .tiny{font-size:11px;color:#71717a;margin-top:10px}
+    a.dl{color:#93c5fd;text-decoration:none;font-weight:500}
+    a.dl:hover{text-decoration:underline}
+    .status{font-size:13px;color:var(--muted);display:flex;align-items:center;gap:6px}
+    .spinner{width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>Lunaᛜ PitchShift — Audio Editor</h1>
+    <p class="muted">Cambia el tono de tu audio sin afectar el tempo. Exporta en MP3 de alta calidad.</p>
+
+    <div class="grid">
+      <label>Archivo de audio
+        <input id="fileIn" type="file" accept="audio/*">
+      </label>
+
+      <div class="player" id="playerSection" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:13px;font-weight:500">Vista previa</span>
+          <div class="toggle-group">
+            <button class="toggle-btn active" data-mode="original">Original</button>
+            <button class="toggle-btn" data-mode="processed">Procesado</button>
+          </div>
+        </div>
+        <div class="waveform">
+          <canvas id="waveCanvas"></canvas>
+        </div>
+        <div class="playback-controls">
+          <button id="playBtn" class="btn-outline">▶ Play</button>
+          <button id="stopBtn" class="btn-outline">■ Stop</button>
+          <span class="time-display"><span id="currentTime">0:00</span> / <span id="totalTime">0:00</span></span>
+        </div>
+      </div>
+
+      <div>
+        <div class="row" style="justify-content:space-between;font-size:13px;margin-bottom:6px">
+          <span>Semitonos: <b id="stVal">0</b></span>
+          <span class="muted">Rango −12 a +12</span>
+        </div>
+        <input id="stSlider" type="range" min="-12" max="12" step="1" value="0">
+        <div class="row" style="margin-top:8px">
+          <button class="btn-outline" data-st="0">Reset</button>
+          <button class="btn-outline" data-st="-2">−2</button>
+          <button class="btn-outline" data-st="2">+2</button>
+          <button class="btn-outline" data-st="5">+5</button>
+          <button class="btn-outline" data-st="7">+7</button>
+        </div>
+      </div>
+
+      <div>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:8px">
+          <input type="checkbox" id="preserveTempo" checked>
+          <span>Preservar tempo (pitch shifting sin acelerar/desacelerar)</span>
+        </label>
+        <p class="tiny" style="margin:0">Si desactivas, el audio se acelerará/desacelerará con el cambio de tono (método rápido)</p>
+      </div>
+
+      <div class="row">
+        <button id="processBtn" class="btn" disabled>Procesar Audio</button>
+        <button id="exportBtn" class="btn-success" disabled style="display:none">Exportar MP3</button>
+        <a id="dlLink" class="dl" style="display:none" download>📥 Descargar</a>
+        <span id="status" class="status">Carga un audio para comenzar ✨</span>
+      </div>
+    </div>
+
+    <p class="tiny" style="margin-top:16px">💡 Funciona completamente offline. El procesamiento puede tardar unos segundos según la duración del audio.</p>
+  </div>
+</div>
+
+<script>
+let gFile = null;
+let gSemitones = 0;
+let gOriginalBuffer = null;
+let gProcessedBuffer = null;
+let gCurrentSource = null;
+let gAudioContext = null;
+let gIsPlaying = false;
+let gPlayMode = 'original';
+let gStartTime = 0;
+let gPauseTime = 0;
+let gDownloadUrl = null;
+
+const fileIn = document.getElementById('fileIn');
+const stSlider = document.getElementById('stSlider');
+const stVal = document.getElementById('stVal');
+const processBtn = document.getElementById('processBtn');
+const exportBtn = document.getElementById('exportBtn');
+const dlLink = document.getElementById('dlLink');
+const statusEl = document.getElementById('status');
+const playerSection = document.getElementById('playerSection');
+const playBtn = document.getElementById('playBtn');
+const stopBtn = document.getElementById('stopBtn');
+const currentTimeEl = document.getElementById('currentTime');
+const totalTimeEl = document.getElementById('totalTime');
+const waveCanvas = document.getElementById('waveCanvas');
+const preserveTempo = document.getElementById('preserveTempo');
+
+fileIn.addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  
+  gFile = file;
+  statusEl.innerHTML = '<div class="spinner"></div> Cargando audio...';
+  processBtn.disabled = true;
+  exportBtn.style.display = 'none';
+  dlLink.style.display = 'none';
+  
+  try {
+    if (!gAudioContext) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      gAudioContext = new AC({sampleRate: 44100});
+    }
+    
+    const arrayBuffer = await file.arrayBuffer();
+    gOriginalBuffer = await gAudioContext.decodeAudioData(arrayBuffer);
+    gProcessedBuffer = null;
+    
+    playerSection.style.display = 'block';
+    drawWaveform(gOriginalBuffer);
+    totalTimeEl.textContent = formatTime(gOriginalBuffer.duration);
+    
+    processBtn.disabled = false;
+    statusEl.textContent = 'Audio cargado. Ajusta semitonos y presiona Procesar.';
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = 'Error al cargar audio: ' + err.message;
+  }
+});
+
+stSlider.addEventListener('input', (e) => {
+  gSemitones = parseInt(e.target.value, 10);
+  stVal.textContent = gSemitones;
+  gProcessedBuffer = null;
+  exportBtn.style.display = 'none';
+  dlLink.style.display = 'none';
+  if (gOriginalBuffer) {
+    processBtn.disabled = false;
+    statusEl.textContent = 'Ajusta semitonos y presiona Procesar.';
+  }
+});
+
+document.querySelectorAll('.btn-outline[data-st]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    stSlider.value = btn.getAttribute('data-st');
+    stSlider.dispatchEvent(new Event('input'));
+  });
+});
+
+processBtn.addEventListener('click', async () => {
+  if (!gOriginalBuffer) return;
+  
+  stopAudio();
+  statusEl.innerHTML = '<div class="spinner"></div> Procesando audio...';
+  processBtn.disabled = true;
+  exportBtn.style.display = 'none';
+  
+  try {
+    const useTempoPreservation = preserveTempo.checked;
+    
+    if (useTempoPreservation && gSemitones !== 0) {
+      gProcessedBuffer = await pitchShiftWithTempoPreservation(gOriginalBuffer, gSemitones);
+    } else {
+      gProcessedBuffer = await pitchShiftSimple(gOriginalBuffer, gSemitones);
+    }
+    
+    if (gPlayMode === 'processed') {
+      drawWaveform(gProcessedBuffer);
+    }
+    
+    exportBtn.style.display = 'inline-block';
+    exportBtn.disabled = false;
+    statusEl.textContent = '✓ Audio procesado. Escucha el resultado o exporta.';
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = 'Error al procesar: ' + err.message;
+    processBtn.disabled = false;
+  }
+});
+
+async function pitchShiftSimple(buffer, semitones) {
+  const pitchRatio = Math.pow(2, semitones / 12);
+  const sampleRate = buffer.sampleRate;
+  const duration = buffer.duration / pitchRatio;
+  
+  const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const offline = new OAC(buffer.numberOfChannels, Math.ceil(duration * sampleRate), sampleRate);
+  
+  const source = offline.createBufferSource();
+  source.buffer = buffer;
+  source.playbackRate.value = pitchRatio;
+  source.connect(offline.destination);
+  source.start(0);
+  
+  return await offline.startRendering();
+}
+
+async function pitchShiftWithTempoPreservation(buffer, semitones) {
+  const pitchRatio = Math.pow(2, semitones / 12);
+  const sampleRate = buffer.sampleRate;
+  const numChannels = buffer.numberOfChannels;
+  
+  const grainSize = 0.1;
+  const overlap = 0.5;
+  const hopSize = grainSize * (1 - overlap);
+  
+  const duration = buffer.duration;
+  const OAC = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  const offline = new OAC(numChannels, Math.ceil(duration * sampleRate), sampleRate);
+  
+  const grainSizeSamples = Math.floor(grainSize * sampleRate);
+  const hopSizeSamples = Math.floor(hopSize * sampleRate);
+  
+  let currentTime = 0;
+  let sourcePos = 0;
+  
+  while (sourcePos < buffer.length - grainSizeSamples) {
+    const grain = offline.createBufferSource();
+    const grainBuffer = offline.createBuffer(numChannels, grainSizeSamples, sampleRate);
+    
+    for (let ch = 0; ch < numChannels; ch++) {
+      const sourceData = buffer.getChannelData(ch);
+      const grainData = grainBuffer.getChannelData(ch);
+      
+      for (let i = 0; i < grainSizeSamples; i++) {
+        const idx = sourcePos + i;
+        if (idx < sourceData.length) {
+          const window = 0.5 * (1 - Math.cos(2 * Math.PI * i / grainSizeSamples));
+          grainData[i] = sourceData[idx] * window;
+        }
+      }
+    }
+    
+    grain.buffer = grainBuffer;
+    grain.playbackRate.value = pitchRatio;
+    grain.connect(offline.destination);
+    grain.start(currentTime);
+    
+    currentTime += hopSize;
+    sourcePos += hopSizeSamples;
+  }
+  
+  return await offline.startRendering();
+}
+
+document.querySelectorAll('.toggle-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.toggle-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    gPlayMode = btn.dataset.mode;
+    
+    stopAudio();
+    
+    if (gPlayMode === 'original' && gOriginalBuffer) {
+      drawWaveform(gOriginalBuffer);
+      totalTimeEl.textContent = formatTime(gOriginalBuffer.duration);
+    } else if (gPlayMode === 'processed' && gProcessedBuffer) {
+      drawWaveform(gProcessedBuffer);
+      totalTimeEl.textContent = formatTime(gProcessedBuffer.duration);
+    }
+  });
+});
+
+playBtn.addEventListener('click', () => {
+  if (gIsPlaying) {
+    pauseAudio();
+  } else {
+    playAudio();
+  }
+});
+
+stopBtn.addEventListener('click', () => {
+  stopAudio();
+});
+
+function playAudio() {
+  const buffer = gPlayMode === 'original' ? gOriginalBuffer : gProcessedBuffer;
+  if (!buffer) return;
+  
+  stopAudio();
+  
+  gCurrentSource = gAudioContext.createBufferSource();
+  gCurrentSource.buffer = buffer;
+  gCurrentSource.connect(gAudioContext.destination);
+  
+  gStartTime = gAudioContext.currentTime - gPauseTime;
+  gCurrentSource.start(0, gPauseTime);
+  gIsPlaying = true;
+  playBtn.textContent = '⏸ Pause';
+  
+  updateTime();
+  
+  gCurrentSource.onended = () => {
+    if (gIsPlaying) {
+      stopAudio();
+    }
+  };
+}
+
+function pauseAudio() {
+  if (gCurrentSource) {
+    gPauseTime = gAudioContext.currentTime - gStartTime;
+    gCurrentSource.stop();
+    gCurrentSource = null;
+  }
+  gIsPlaying = false;
+  playBtn.textContent = '▶ Play';
+}
+
+function stopAudio() {
+  if (gCurrentSource) {
+    gCurrentSource.stop();
+    gCurrentSource = null;
+  }
+  gIsPlaying = false;
+  gPauseTime = 0;
+  gStartTime = 0;
+  playBtn.textContent = '▶ Play';
+  currentTimeEl.textContent = '0:00';
+}
+
+function updateTime() {
+  if (!gIsPlaying) return;
+  
+  const buffer = gPlayMode === 'original' ? gOriginalBuffer : gProcessedBuffer;
+  if (buffer) {
+    const elapsed = gAudioContext.currentTime - gStartTime;
+    currentTimeEl.textContent = formatTime(Math.min(elapsed, buffer.duration));
+    
+    if (elapsed < buffer.duration) {
+      requestAnimationFrame(updateTime);
+    }
+  }
+}
+
+function drawWaveform(buffer) {
+  const canvas = waveCanvas;
+  const ctx = canvas.getContext('2d');
+  canvas.width = canvas.offsetWidth * window.devicePixelRatio;
+  canvas.height = canvas.offsetHeight * window.devicePixelRatio;
+  ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+  
+  const width = canvas.offsetWidth;
+  const height = canvas.offsetHeight;
+  
+  ctx.fillStyle = '#0a0a0b';
+  ctx.fillRect(0, 0, width, height);
+  
+  const data = buffer.getChannelData(0);
+  const step = Math.ceil(data.length / width);
+  const amp = height / 2;
+  
+  ctx.strokeStyle = '#2563eb';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  
+  for (let i = 0; i < width; i++) {
+    let min = 1.0;
+    let max = -1.0;
+    
+    for (let j = 0; j < step; j++) {
+      const datum = data[(i * step) + j] || 0;
+      if (datum < min) min = datum;
+      if (datum > max) max = datum;
+    }
+    
+    const yMin = (1 + min) * amp;
+    const yMax = (1 + max) * amp;
+    
+    if (i === 0) {
+      ctx.moveTo(i, yMin);
+    }
+    ctx.lineTo(i, yMin);
+    ctx.lineTo(i, yMax);
+  }
+  
+  ctx.stroke();
+}
+
+exportBtn.addEventListener('click', async () => {
+  if (!gProcessedBuffer) return;
+  
+  statusEl.innerHTML = '<div class="spinner"></div> Exportando MP3...';
+  exportBtn.disabled = true;
+  
+  try {
+    const mp3Blob = await encodeToMP3(gProcessedBuffer);
+    
+    if (gDownloadUrl) URL.revokeObjectURL(gDownloadUrl);
+    gDownloadUrl = URL.createObjectURL(mp3Blob);
+    
+    dlLink.href = gDownloadUrl;
+    const baseName = gFile.name.replace(/\.[^/.]+$/, '') || 'audio';
+    dlLink.download = `${baseName}_${gSemitones > 0 ? '+' : ''}${gSemitones}st.mp3`;
+    dlLink.style.display = 'inline';
+    
+    statusEl.textContent = '✓ MP3 listo para descargar';
+    exportBtn.disabled = false;
+  } catch (err) {
+    console.error(err);
+    statusEl.textContent = 'Error al exportar: ' + err.message;
+    exportBtn.disabled = false;
+  }
+});
+
+async function encodeToMP3(audioBuffer) {
+  if (!window.lamejs) {
+    await loadScript('https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js');
+  }
+  
+  const channels = audioBuffer.numberOfChannels;
+  const sampleRate = audioBuffer.sampleRate;
+  const left = audioBuffer.getChannelData(0);
+  const right = channels > 1 ? audioBuffer.getChannelData(1) : left;
+  
+  const leftPCM = convertFloat32ToInt16(left);
+  const rightPCM = convertFloat32ToInt16(right);
+  
+  const mp3encoder = new lamejs.Mp3Encoder(channels, sampleRate, 320);
+  const mp3Data = [];
+  
+  const sampleBlockSize = 1152;
+  for (let i = 0; i < leftPCM.length; i += sampleBlockSize) {
+    const leftChunk = leftPCM.subarray(i, i + sampleBlockSize);
+    const rightChunk = rightPCM.subarray(i, i + sampleBlockSize);
+    const mp3buf = mp3encoder.encodeBuffer(leftChunk, rightChunk);
+    if (mp3buf.length > 0) {
+      mp3Data.push(mp3buf);
+    }
+  }
+  
+  const mp3buf = mp3encoder.flush();
+  if (mp3buf.length > 0) {
+    mp3Data.push(mp3buf);
+  }
+  
+  return new Blob(mp3Data, { type: 'audio/mp3' });
+}
+
+function convertFloat32ToInt16(buffer) {
+  const l = buffer.length;
+  const buf = new Int16Array(l);
+  for (let i = 0; i < l; i++) {
+    const s = Math.max(-1, Math.min(1, buffer[i]));
+    buf[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+  }
+  return buf;
+}
+
+function loadScript(url) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = url;
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+}
+
+function formatTime(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+</script>
+</body>
+</html>
